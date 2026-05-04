@@ -4,7 +4,7 @@ Get your AI agent integrated with Peakly in under 10 minutes.
 
 ## Prerequisites
 
-- A Peakly account at [app.peakly.ar](https://app.peakly.ar)
+- A Peakly account at [peakly.ar](https://peakly.ar)
 - An organization configured with at least one receipt book (talonario)
 
 ## 1. Authentication
