@@ -2,7 +2,7 @@
 
 Step-by-step recipes for common invoicing workflows. All examples use `curl`; see the TypeScript equivalents in the SDK quick start.
 
-Base URL: `https://api.peakly.co`  
+Base URL: `https://api.peakly.ar`  
 Auth header: `X-API-Key: pk_your_api_key_here`
 
 ---
@@ -11,11 +11,11 @@ Auth header: `X-API-Key: pk_your_api_key_here`
 
 ```bash
 # By name
-curl "https://api.peakly.co/v1/customers?search=ACME" \
+curl "https://api.peakly.ar/v1/customers?search=ACME" \
   -H "X-API-Key: pk_your_api_key_here"
 
 # By CUIT (use the raw number, no dashes)
-curl "https://api.peakly.co/v1/customers/lookup-cuit?cuit=30123456789" \
+curl "https://api.peakly.ar/v1/customers/lookup-cuit?cuit=30123456789" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
@@ -40,7 +40,7 @@ Use `id` when creating receipts. Use `ivaCondition` to pick the correct receipt 
 Use when your customer is a **consumer** (`consumidor_final`) or **monotributista**.
 
 ```bash
-curl -X POST "https://api.peakly.co/v1/sales/sales-receipts" \
+curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts" \
   -H "X-API-Key: pk_your_api_key_here" \
   -H "Content-Type: application/json" \
   -d '{
@@ -66,8 +66,17 @@ For Factura B, the price is typically expressed **including IVA** (precio con IV
 
 Use when your customer is a **responsable inscripto** (company registered for IVA).
 
+For Factura A, each line item must include a `taxTypeId` referencing an IVA rate. Fetch available IVA types first:
+
 ```bash
-curl -X POST "https://api.peakly.co/v1/sales/sales-receipts" \
+curl "https://api.peakly.ar/v1/combos/9/items" \
+  -H "X-API-Key: pk_your_api_key_here"
+```
+
+This returns the IVA combo items with their IDs (e.g. `taxTypeId: 3` for 21%, `taxTypeId: 2` for 10.5%, `taxTypeId: 1` for 0%). Use the appropriate `id` in the `taxTypeId` field.
+
+```bash
+curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts" \
   -H "X-API-Key: pk_your_api_key_here" \
   -H "Content-Type: application/json" \
   -d '{
@@ -80,18 +89,18 @@ curl -X POST "https://api.peakly.co/v1/sales/sales-receipts" \
         "description": "Consulting - April 2026",
         "quantity": 1,
         "unitPrice": 10000.00,
-        "ivaRate": 21
+        "taxTypeId": 3
       }
     ]
   }'
 ```
 
-For Factura A, specify `ivaRate` (0, 10.5, or 21) per line item. The net price goes in `unitPrice`, and IVA is calculated separately.
+The net price goes in `unitPrice`; IVA is calculated separately by Peakly based on the `taxTypeId`.
 
 **After creation, authorize with AFIP:**
 
 ```bash
-curl -X POST "https://api.peakly.co/v1/sales/sales-receipts/{id}/authorize" \
+curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts/{id}/authorize" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
@@ -104,26 +113,35 @@ A `cae` field appears in the response once AFIP approves. Without a CAE, the rec
 Once a receipt has been authorized by AFIP, it cannot be deleted — it can only be voided (anulado).
 
 ```bash
-curl -X POST "https://api.peakly.co/v1/sales/sales-receipts/{id}/void" \
+curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts/{id}/void" \
   -H "X-API-Key: pk_your_api_key_here" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
+By default, Peakly automatically creates a compensating credit note (Nota de Crédito). To skip it, send `{"createCreditNote": false}`.
+
 **Notes:**
-- Only same-day receipts can be voided in some AFIP configurations. If the receipt is from a prior period, you must issue a **Nota de Crédito** (credit note) instead.
+- Only same-period receipts can be voided in some AFIP configurations. If the receipt is from a prior period, you must issue a **Nota de Crédito** (credit note) instead.
 - A voided receipt returns `status: "anulado"`.
 
 ---
 
-## 5. Check outstanding balance for a customer
+## 5. Check outstanding receivables
 
 ```bash
-curl "https://api.peakly.co/v1/sales/reports/outstanding-receivables?customerId=42" \
+curl "https://api.peakly.ar/v1/sales/reports/outstanding-receivables" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
-Returns a list of unpaid receipts with their due dates and amounts.
+Returns a paginated list of unpaid receipts with their due dates and amounts across all customers.
+
+**Pagination:**
+
+| Parameter | Description |
+|---|---|
+| `cursor` | Opaque cursor for the next page (from previous response) |
+| `page_size` | Results per page (default 50, max 100) |
 
 ---
 
@@ -131,7 +149,7 @@ Returns a list of unpaid receipts with their due dates and amounts.
 
 ```bash
 # Replace date with today's date
-curl "https://api.peakly.co/v1/sales/sales-receipts?dateFrom=2026-04-29&dateTo=2026-04-29" \
+curl "https://api.peakly.ar/v1/sales/sales-receipts?date_from=2026-04-29&date_to=2026-04-29" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
@@ -139,17 +157,17 @@ curl "https://api.peakly.co/v1/sales/sales-receipts?dateFrom=2026-04-29&dateTo=2
 
 | Parameter | Description |
 |---|---|
-| `dateFrom` / `dateTo` | Date range (`YYYY-MM-DD`) |
+| `date_from` / `date_to` | Date range (`YYYY-MM-DD`) |
 | `status` | Filter by status: `draft`, `confirmed`, `authorized`, `anulado` |
-| `customerId` | Filter by customer ID |
-| `receiptType` | Filter by factura type: `A`, `B`, `C`, `E` |
+| `customer_id` | Filter by customer ID |
+| `receipt_type` | Filter by factura type: `factura`, `nota_credito`, `nota_debito` |
 
 ---
 
 ## 7. Get organization dashboard summary
 
 ```bash
-curl "https://api.peakly.co/v1/sales/reports/dashboard-stats" \
+curl "https://api.peakly.ar/v1/sales/reports/dashboard-stats" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 

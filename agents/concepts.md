@@ -63,9 +63,7 @@ Standard rates:
 - **10.5%** — reduced rate (some food, medicine, construction)
 - **0%** — exempt (some agricultural goods, exports)
 
-For **Factura A**, each line item specifies its `ivaRate`. For **Factura B**, IVA is embedded in the total price and AFIP extracts it automatically.
-
-In the Peakly API, use `ivaRate: 21` (not `0.21`) on detail lines for Factura A.
+For **Factura A**, each line item specifies its IVA type via `taxTypeId` (a combo item ID from `GET /v1/combos/9/items`). For **Factura B**, IVA is embedded in the total price and AFIP extracts it automatically.
 
 ---
 
@@ -118,7 +116,7 @@ The **sale condition** specifies the payment terms:
 | `3` | 60 days |
 | `4` | 90 days |
 
-Fetch the list for your organization: `GET /v1/sale-conditions`. The `id` field goes into `saleConditionId` on the receipt.
+Fetch the list: `GET /v1/combos/6/items`. The `id` field goes into `saleConditionId` on the receipt.
 
 ---
 

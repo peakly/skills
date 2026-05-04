@@ -4,7 +4,7 @@ Get your AI agent integrated with Peakly in under 10 minutes.
 
 ## Prerequisites
 
-- A Peakly account at [app.peakly.co](https://app.peakly.co)
+- A Peakly account at [app.peakly.ar](https://app.peakly.ar)
 - An organization configured with at least one receipt book (talonario)
 
 ## 1. Authentication
@@ -25,7 +25,7 @@ The API key is scoped to your organization — no `org_id` parameter needed.
 **Test your key:**
 
 ```bash
-curl https://api.peakly.co/v1/customers \
+curl https://api.peakly.ar/v1/customers \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
@@ -54,7 +54,7 @@ Creating a sales receipt (factura) is a three-step process: look up the customer
 ### Step 1: Find the customer
 
 ```bash
-curl "https://api.peakly.co/v1/customers?search=ACME" \
+curl "https://api.peakly.ar/v1/customers?search=ACME" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
@@ -72,7 +72,7 @@ curl "https://api.peakly.co/v1/customers?search=ACME" \
 ### Step 2: Find a receipt book
 
 ```bash
-curl "https://api.peakly.co/v1/receipt-books" \
+curl "https://api.peakly.ar/v1/receipt-books" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
@@ -83,7 +83,7 @@ Look for a receipt book whose `receiptType` matches the customer's IVA condition
 ### Step 3: Create the receipt
 
 ```bash
-curl -X POST "https://api.peakly.co/v1/sales/sales-receipts" \
+curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts" \
   -H "X-API-Key: pk_your_api_key_here" \
   -H "Content-Type: application/json" \
   -d '{
