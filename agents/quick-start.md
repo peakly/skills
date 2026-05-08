@@ -29,7 +29,7 @@ curl https://api.peakly.ar/v1/customers \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
-A `200 OK` with a JSON array confirms you're authenticated.
+A `200 OK` with `{ "data": [...], "nextCursor": null, "hasMore": false }` confirms you are authenticated.
 
 ## 2. Environment Variables
 
@@ -59,15 +59,30 @@ curl "https://api.peakly.ar/v1/customers?search=ACME" \
 ```
 
 ```json
-[
-  {
-    "id": 42,
-    "businessName": "ACME S.A.",
-    "cuit": "30-12345678-9",
-    "ivaCondition": "responsable_inscripto"
-  }
-]
+{
+  "data": [
+    {
+      "id": 42,
+      "businessName": "ACME S.A.",
+      "taxId": "30123456789",
+      "taxCategoryId": 1,
+      "email": "pagos@acme.com.ar",
+      "isActive": true
+    }
+  ],
+  "nextCursor": null,
+  "hasMore": false
+}
 ```
+
+The `taxCategoryId` tells you the customer's IVA condition. Fetch the full list of tax categories to know which IVA type applies:
+
+```bash
+curl "https://api.peakly.ar/v1/tax-categories" \
+  -H "X-API-Key: pk_your_api_key_here"
+```
+
+Look at the `discriminates` flag: `true` means the customer is **Responsable Inscripto** (RI) and expects a Factura A with itemized IVA. `false` means Consumidor Final, Monotributista, or Exento — use Factura B or C.
 
 ### Step 2: Find a receipt book
 
@@ -76,11 +91,11 @@ curl "https://api.peakly.ar/v1/receipt-books" \
   -H "X-API-Key: pk_your_api_key_here"
 ```
 
-Look for a receipt book whose `receiptType` matches the customer's IVA condition:
-- Customer is `responsable_inscripto` → use a **Factura A** receipt book
-- Customer is `consumidor_final` or `monotributista` → use a **Factura B** or **C** receipt book
+A single receipt book supports Factura A, B, and C — the actual letter issued is determined by the customer's tax category at the time of creation. Pick a receipt book based on your organization's setup (e.g., by `description` or `pointOfSale` number).
 
 ### Step 3: Create the receipt
+
+When `isDraft` is omitted (or `false`), the receipt is automatically confirmed and submitted to AFIP — no separate authorize call needed.
 
 ```bash
 curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts" \
@@ -101,7 +116,9 @@ curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts" \
   }'
 ```
 
-A successful response includes a `cae` field once AFIP authorizes the receipt. If `cae` is absent, the receipt is in draft (`isDraft: true`) — call `POST /v1/sales/sales-receipts/{id}/authorize` to submit to AFIP.
+The response includes `status: "Pendiente_Afip"` immediately after creation. Once AFIP responds, the receipt moves to `status: "Creada"` and a `cae` value appears (14-digit AFIP authorization code). If AFIP is slow, poll `GET /v1/sales/sales-receipts/{id}` until `status` changes.
+
+**Creating as a draft first** (optional): pass `"isDraft": true` to skip the AFIP step. The receipt stays at `status: "Borrador"`. When ready, call `POST /v1/sales/sales-receipts/{id}/confirm` to trigger AFIP authorization.
 
 ## 4. Error Handling
 
@@ -127,20 +144,25 @@ Common errors to handle:
 
 ### AFIP rejections
 
+When AFIP rejects a receipt during authorization, the receipt remains at `status: "Pendiente_Afip"` and the authorize result includes an `error` field:
+
 ```json
 {
-  "statusCode": 422,
-  "message": "AFIP rejected the receipt",
-  "afipError": {
-    "code": 10016,
-    "description": "El campo IVA no puede ser cero para este tipo de comprobante"
-  }
+  "success": false,
+  "error": "El campo IVA no puede ser cero para este tipo de comprobante"
 }
 ```
 
-When you receive a `422`, read `afipError.description` — it contains the official AFIP error message in Spanish. Common fixes:
+To retry AFIP authorization after fixing the issue, call:
+
+```bash
+curl -X POST "https://api.peakly.ar/v1/sales/sales-receipts/{id}/authorize" \
+  -H "X-API-Key: pk_your_api_key_here"
+```
+
+Common AFIP error codes:
 - `10016` — IVA amount is missing or zero for a Factura A
-- `10043` — Receipt number is out of sequence (use `/v1/sales/sales-receipts/next-number`)
+- `10043` — Receipt number is out of sequence (use `GET /v1/sales/sales-receipts/next-number?receipt_book_id={id}&customer_id={id}` to preview)
 - `10048` — AFIP service temporarily unavailable, retry with exponential backoff
 
 ## 5. SDK Quick Reference
@@ -151,11 +173,12 @@ import { PeaklyClient } from "@peakly/sdk";
 const client = new PeaklyClient({ apiKey: process.env.PEAKLY_API_KEY! });
 
 // Find customers
-const { data: customers } = await client.sales.customers.list({ search: "ACME" });
+const { data: page } = await client.sales.customers.list({ search: "ACME" });
+const customer = page.data[0];
 
-// Create a receipt
+// Create a receipt (auto-submits to AFIP)
 const { data: receipt, error } = await client.sales.receipts.create({
-  customerId: 42,
+  customerId: customer.id,
   receiptBookId: 1,
   date: "2026-04-29",
   saleConditionId: 1,
@@ -165,11 +188,9 @@ const { data: receipt, error } = await client.sales.receipts.create({
 if (error) {
   console.error("Failed:", error);
 } else {
-  console.log("CAE:", receipt.cae);
+  // Poll until AFIP responds (status changes from Pendiente_Afip to Creada)
+  console.log("Status:", receipt.status, "CAE:", receipt.cae);
 }
-
-// Authorize (submit to AFIP)
-await client.sales.receipts.authorize(receipt.id);
 ```
 
 ## Next Steps
