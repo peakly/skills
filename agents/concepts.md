@@ -4,53 +4,56 @@ This guide explains the Argentine fiscal and invoicing system so your agent can 
 
 ---
 
-## AFIP
+## AFIP / ARCA
 
-**AFIP** (Administración Federal de Ingresos Públicos) is Argentina's federal tax authority — the equivalent of the IRS (USA) or HMRC (UK).
+**AFIP** (Administración Federal de Ingresos Públicos) is Argentina's federal tax authority — the equivalent of the IRS (USA) or HMRC (UK). It has been rebranded as **ARCA** (Agencia de Recaudación y Control Aduanero) but both names are still used interchangeably.
 
 Every fiscal invoice issued in Argentina must be authorized by AFIP before it is legally valid. This authorization happens in real time via AFIP's web service and results in a **CAE**.
 
-When creating a sales receipt through Peakly, the authorization step calls AFIP's servers on your behalf. If AFIP is unavailable, the receipt stays in `pending` status until it can be resubmitted.
+When creating a sales receipt through Peakly, the authorization step calls AFIP's servers on your behalf. If AFIP is unavailable, the receipt stays in `Pendiente_Afip` status until it can be resubmitted.
 
 ---
 
 ## CAE (Código de Autorización Electrónico)
 
-The **CAE** is a numeric code AFIP returns when it approves a fiscal document. A receipt without a CAE is **not a valid fiscal invoice** — it is only a draft.
+The **CAE** is a numeric code AFIP returns when it approves a fiscal document. A receipt without a CAE is **not a valid fiscal invoice**.
 
 - Format: 14-digit number, e.g. `71827364918273`
-- Expiry: each CAE has a `caeDueDate` — typically 10 days after issuance
-- Printed on invoices: the CAE and its due date appear on the PDF
+- Expiry: each CAE has a `caeExpiration` date — typically 10 days after issuance
+- Printed on invoices: the CAE and its expiration date appear on the PDF
 
-In the Peakly API, a receipt has `cae: null` until authorized. After calling `/v1/sales/sales-receipts/{id}/authorize`, the response includes `cae` and `caeDueDate`.
+In the Peakly API, a receipt has `cae: null` until authorized. After AFIP processes the receipt, `cae` and `caeExpiration` are populated.
 
 ---
 
 ## Factura Types
 
-The type of invoice to issue depends on the **IVA condition** of both parties.
+The type of invoice to issue depends on the **tax category** of both parties.
 
 | Type | When to use | Notes |
 |---|---|---|
-| **Factura A** | Seller is `responsable_inscripto`, buyer is also `responsable_inscripto` | Net + IVA itemized separately |
-| **Factura B** | Seller is `responsable_inscripto`, buyer is `consumidor_final` or `monotributista` | Price includes IVA |
-| **Factura C** | Seller is `monotributista` | No IVA charged |
-| **Factura E** | Export invoices | Special rules, currency in USD or other |
-| **Nota de Crédito** | Reversal of a prior invoice | Same type as original (A/B/C/E) |
-| **Nota de Débito** | Adjustment increasing the original amount | Less common |
+| **Factura A** | Seller and buyer are both Responsable Inscripto (`discriminates: true`) | Net + IVA itemized separately per line |
+| **Factura B** | Seller is RI, buyer is Consumidor Final or Monotributista | Price includes IVA |
+| **Factura C** | Seller is Monotributista | No IVA charged |
+| **Factura E** | Export invoices | Special rules, currency may be USD |
+| **Nota de Crédito** | Reversal of a prior invoice | Same letter as original (A/B/C/E) |
+| **Nota de Débito** | Upward adjustment to an original invoice | Less common |
 
 **Decision rule for agents:**
 
 ```
-if customer.ivaCondition == "responsable_inscripto":
-    use Factura A receipt book
-elif customer.ivaCondition in ["consumidor_final", "monotributista"]:
-    use Factura B or C receipt book
-elif isExport:
-    use Factura E receipt book
+taxCategories = GET /v1/tax-categories
+category = taxCategories.find(c => c.id == customer.taxCategoryId)
+
+if category.discriminates == true:
+    use Factura A — include taxTypeId per detail line
+elif category.isExport:
+    use Factura E
+else:
+    use Factura B or C
 ```
 
-The `receiptType` field on the receipt book (talonario) tells you which factura type it produces.
+A single receipt book (talonario) covers all letter types (A, B, C). The actual letter is assigned automatically when the receipt is created, based on the customer's tax category.
 
 ---
 
@@ -58,12 +61,29 @@ The `receiptType` field on the receipt book (talonario) tells you which factura 
 
 IVA is Argentina's value-added tax — equivalent to VAT (EU) or GST (Australia).
 
-Standard rates:
-- **21%** — general rate (most services and goods)
-- **10.5%** — reduced rate (some food, medicine, construction)
-- **0%** — exempt (some agricultural goods, exports)
+Standard rates (fetch current IDs from `GET /v1/combos/9/items`):
 
-For **Factura A**, each line item specifies its IVA type via `taxTypeId` (a combo item ID from `GET /v1/combos/9/items`). For **Factura B**, IVA is embedded in the total price and AFIP extracts it automatically.
+| Combo item ID | Rate | Notes |
+|---|---|---|
+| `94` | 21% | General rate (most services and goods) |
+| `93` | 10.5% | Reduced rate (some food, medicine, construction) |
+| `91` | Exento (0%) | Exempt goods |
+| `92` | Sin IVA | Not applicable (Monotributistas, exports) |
+| `90` | No Gravado | Non-taxable items |
+| `95` | 27% | Utilities and telecoms |
+
+For **Factura A**, each detail line specifies its IVA type via `taxTypeId`. For **Factura B**, IVA is embedded in the total price and AFIP extracts it automatically — no `taxTypeId` needed.
+
+---
+
+## Tax Categories
+
+Customers have a `taxCategoryId` (numeric ID) that maps to their fiscal condition. Use `GET /v1/tax-categories` to resolve IDs to names.
+
+Key fields in the response:
+- `discriminates: true` — customer is Responsable Inscripto → use Factura A
+- `discriminates: false` — customer is CF, Monotributista, or Exento → use Factura B or C
+- `abbreviation` — short code, e.g. `"RI"`, `"CF"`, `"MO"`
 
 ---
 
@@ -72,28 +92,38 @@ For **Factura A**, each line item specifies its IVA type via `taxTypeId` (a comb
 **CUIT** (Clave Única de Identificación Tributaria) is the Argentine tax ID for companies and self-employed individuals.  
 **CUIL** (Clave Única de Identificación Laboral) is the equivalent for employees.
 
-Format: `XX-XXXXXXXX-X` (2 + 8 + 1 digits), e.g. `30-12345678-9`.
+Format: `XX-XXXXXXXX-X` (2 + 8 + 1 digits), e.g. `30-12345678-9`. The API stores it as 11 raw digits (no dashes) in `taxId`.
 
-- Starts with `20` or `23` — individual (persona física)
-- Starts with `27` — married woman (historical)
+- Starts with `20`, `23`, or `27` — individual (persona física)
 - Starts with `30` or `33` — company (persona jurídica)
 
-CUIT is required on all Factura A receipts. The Peakly API validates CUIT format and can look up customer data from AFIP using `/v1/customers/lookup-cuit`.
+CUIT is required on all Factura A receipts. The Peakly API validates CUIT format and can auto-fill customer data from AFIP using `GET /v1/customers/lookup-cuit?cuit=30123456789`.
+
+Alternatively, pass `customerTaxId` instead of `customerId` when creating a receipt — Peakly will match or create the customer automatically.
 
 ---
 
 ## Receipt Book (Talonario / Punto de Venta)
 
-A **receipt book** (talonario) is a pre-registered sequence of invoice numbers associated with a **point of sale** (punto de venta, PdV).
+A **receipt book** (talonario) is a pre-registered sequence of invoice numbers associated with a **point of sale** (punto de venta, PdV) registered with AFIP.
 
 Key properties:
-- `pointOfSale` — number registered with AFIP (e.g., `0001`, `0003`)
-- `receiptType` — the factura type (A, B, C, E)
-- `lastNumber` — the last issued invoice number
+- `pointOfSale` — number registered with AFIP (e.g. `1`, `3`)
+- `prefix` — formatted PdV prefix (e.g. `"0001"`)
+- `lastInvoiceA` / `lastInvoiceB` / `lastInvoiceC` — last issued number per letter type
 
-Invoice numbers are sequential and registered with AFIP — they cannot be skipped or reused. When you create a receipt, Peakly assigns the next sequential number automatically. Use `GET /v1/sales/sales-receipts/next-number?receiptBookId={id}` to preview the next number before creating.
+Invoice numbers are sequential per letter type and cannot be skipped or reused. Peakly assigns the next number automatically when a receipt is confirmed. Preview the next number before creating:
 
-Most organizations have separate talonarios for Factura A and Factura B.
+```bash
+GET /v1/sales/sales-receipts/next-number?receipt_book_id={id}&customer_id={id}
+```
+
+Response:
+```json
+{ "letter": "A", "number": "00001-00000124", "nextSequential": 124 }
+```
+
+Note: both `receipt_book_id` and `customer_id` are required — the letter depends on the customer's tax category.
 
 ---
 
@@ -107,32 +137,51 @@ Your API key is scoped to one organization. If you need to issue receipts from a
 
 ## Sale Condition (Condición de Venta)
 
-The **sale condition** specifies the payment terms:
+The **sale condition** specifies payment terms. Fetch the full list:
+
+```bash
+GET /v1/combos/6/items
+```
+
+Common values:
 
 | Typical ID | Description |
 |---|---|
-| `1` | Contado (cash/immediate) |
+| `1` | Contado (cash / immediate) |
 | `2` | 30 days |
 | `3` | 60 days |
 | `4` | 90 days |
 
-Fetch the list: `GET /v1/combos/6/items`. The `id` field goes into `saleConditionId` on the receipt.
+The `id` field goes into `saleConditionId` on the receipt.
 
 ---
 
 ## Receipt Lifecycle
 
 ```
-draft  →  authorized (CAE received)  →  confirmed
-                                           ↓
-                                        anulado (voided)
-                                        or
-                                     nota de crédito (credit note)
+Borrador (draft)
+    ↓  POST /sales-receipts/{id}/confirm
+Pendiente_Afip (waiting for AFIP)
+    ↓  AFIP authorization (automatic)
+Creada (authorized — has CAE, fiscally valid)
+    ↓  optional: mark as collected
+Cobrada (collected / paid)
+    ↓  POST /sales-receipts/{id}/void
+Anulado (voided)
 ```
 
-- `draft` — created but not yet sent to AFIP
-- `authorized` — AFIP returned a CAE; fiscally valid
-- `confirmed` — marked as sent/delivered to customer
-- `anulado` — voided (only same-period receipts; cross-period requires a credit note)
+- `Borrador` — created with `isDraft: true`; not yet sent to AFIP. Call `confirm` to trigger authorization.
+- `Pendiente_Afip` — submitted to AFIP; awaiting response (usually seconds). Created receipts without `isDraft` start here.
+- `Creada` — AFIP returned a CAE; receipt is fiscally valid.
+- `Cobrada` — marked as fully collected (optional status, used for accounting reconciliation).
+- `Anulado` — voided. Only `Creada` or `Cobrada` receipts can be voided.
 
-Agents should check `status` and `cae` to know whether a receipt is legally valid before referencing it.
+**Shortcut for non-drafts:** creating a receipt without `isDraft: true` automatically confirms and submits to AFIP. No separate `confirm` or `authorize` call is needed.
+
+**Retrying failed authorization:** if a receipt gets stuck at `Pendiente_Afip` due to an AFIP error, fix the underlying issue and call:
+
+```bash
+POST /v1/sales/sales-receipts/{id}/authorize
+```
+
+This returns `{ "success": true, "cae": "...", "caeExpiration": "..." }` on success.
