@@ -197,3 +197,4 @@ if (error) {
 
 - [Workflow Cookbook](workflows.md) — common agent patterns (search customer, create Factura A/B, void, check balance)
 - [Concepts](concepts.md) — understand Argentine invoicing, AFIP, CAE, and factura types
+- [Entity Reference](entities.md) — field-level guide for Customer, Product, and Sales Receipt

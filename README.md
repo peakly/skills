@@ -9,6 +9,7 @@ Agent skills and guides for integrating with the [Peakly API](https://peakly.co)
 | [Quick Start](agents/quick-start.md) | Authenticate and send your first invoice in minutes |
 | [Workflow Cookbook](agents/workflows.md) | Step-by-step recipes for common invoicing workflows |
 | [Concepts](agents/concepts.md) | Argentine invoicing fundamentals (AFIP, CAE, factura types) |
+| [Entity Reference](agents/entities.md) | Field-level reference for Customer, Product, and Sales Receipt |
 
 ## SDK & CLI
 
